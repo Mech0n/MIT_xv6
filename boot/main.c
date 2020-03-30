@@ -84,8 +84,12 @@ bootmain(void)
 		goto bad;
 
 	// load each program segment (ignores ph flags)
+	// 加载 ELF 文件中的程序段 (ignores ph flags).
+	// 找到内核 ELF 文件的程序头表
 	ph = (struct Proghdr *) ((uint8_t *) ELFHDR + ELFHDR->e_phoff);
+	// 内核 ELF 文件程序头表的结束位置
 	eph = ph + ELFHDR->e_phnum;
+	// 开始将内核 ELF 文件程序头表载入内存
 	for (; ph < eph; ph++)
 		// p_pa is the load address of this segment (as well
 		// as the physical address)
