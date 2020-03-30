@@ -12,21 +12,21 @@
 .globl start
 start:
   .code16                     # Assemble for 16-bit mode
-  cli                         # Disable interrupts
-  cld                         # String operations increment
+  cli                         # Disable interrupts # 禁止硬件CPU中断 防止ss:sp出现问题 # sti
+  cld                         # String operations increment # 清零寄存器 DF # std 
 
   # Set up the important data segment registers (DS, ES, SS).
   xorw    %ax,%ax             # Segment number zero
-  movw    %ax,%ds             # -> Data Segment
+  movw    %ax,%ds             # -> Data Segment # Global 段
   movw    %ax,%es             # -> Extra Segment
-  movw    %ax,%ss             # -> Stack Segment
+  movw    %ax,%ss             # -> Stack Segment  # stack 段
 
-  # Enable A20:
+  # Enable A20: # 通过键盘控制器端口的方法打开 A20 地址
   #   For backwards compatibility with the earliest PCs, physical
   #   address line 20 is tied low, so that addresses higher than
   #   1MB wrap around to zero by default.  This code undoes this.
 seta20.1:
-  inb     $0x64,%al               # Wait for not busy
+  inb     $0x64,%al               # Wait for not busy # 从I/O端口读取一个字节(BYTE, HALF-WORD) 
   testb   $0x2,%al
   jnz     seta20.1
 
@@ -40,19 +40,19 @@ seta20.2:
 
   movb    $0xdf,%al               # 0xdf -> port 0x60
   outb    %al,$0x60
-
-  # Switch from real to protected mode, using a bootstrap GDT
+  
+  # Switch from real to protected mode, using a bootstrap GDT # 控制寄存器 CR0 为 32 位寄存器，和保护模式相关的控制位
   # and segment translation that makes virtual addresses 
   # identical to their physical addresses, so that the 
   # effective memory map does not change during the switch.
-  lgdt    gdtdesc
+  lgdt    gdtdesc                 # GDT 地址
   movl    %cr0, %eax
   orl     $CR0_PE_ON, %eax
-  movl    %eax, %cr0
+  movl    %eax, %cr0              # 置位 CR0 -> PE
   
-  # Jump to next instruction, but in 32-bit code segment.
+  # Jump to next instruction, but in 32-bit code segment. # 开始32位模式。
   # Switches processor into 32-bit mode.
-  ljmp    $PROT_MODE_CSEG, $protcseg
+  ljmp    $PROT_MODE_CSEG, $protcseg   # Long jump, use $PROT_MODE_CSEG for the CS register and $protcseg for the EIP register:
 
   .code32                     # Assemble for 32-bit mode
 protcseg:
