@@ -93,6 +93,11 @@ bootmain(void)
 	for (; ph < eph; ph++)
 		// p_pa is the load address of this segment (as well
 		// as the physical address)
+		// p_pa是需要被加载的地址。
+		// p_memsz指的是需要的物理内存的大小
+		// p_offset指的是在逻辑上相对于整个文件头的偏移量。
+		// 虽然这里p_memsz表示的时候需要占用的内存的大小。
+		// 实际上也是磁盘上需要读取的数据量的大小。
 		readseg(ph->p_pa, ph->p_memsz, ph->p_offset);
 
 	// call the entry point from the ELF header
