@@ -122,10 +122,14 @@ readseg(uint32_t pa, uint32_t count, uint32_t offset)
 
 	// round down to sector boundary
 	// 向下舍入取扇区边界
+	// 注意，这里把offset修正过了。由于第一个扇区放的是
+	// boot loader。所以内存实际上是从第2个扇区开始放的。
 	pa &= ~(SECTSIZE - 1);
 
 	// translate from bytes to sectors, and kernel starts at sector 1
 	// 将字节偏移转换为扇区偏移，内核从扇区1开始
+	// bootblock 引导区在第一扇区（下标为 0），内核在第二个扇区（下标为 1）
+	// 这里做 +1 操作是统一略过引导区
 	offset = (offset / SECTSIZE) + 1;
 
 	// If this is too slow, we could read lots of sectors at a time.
