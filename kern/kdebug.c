@@ -16,7 +16,8 @@ extern const char __STABSTR_END__[];		// End of string table
 //	Some stab types are arranged in increasing order by instruction
 //	address.  For example, N_FUN stabs (stab entries with n_type ==
 //	N_FUN), which mark functions, and N_SO stabs, which mark source files.
-//
+//  源文件 : n_type == N_SO 
+//  函数 : n_type == N_FUN
 //	Given an instruction address, this function finds the single stab
 //	entry of type 'type' that contains that address.
 //
@@ -179,6 +180,16 @@ debuginfo_eip(uintptr_t addr, struct Eipdebuginfo *info)
 	//	Look at the STABS documentation and <inc/stab.h> to find
 	//	which one.
 	// Your code here.
+	int olline = lline, orline = rline;
+	stab_binsearch(stabs, &olline, &orline, N_SOL, (!(lline == lfile && rline == rfile))*addr + info->eip_fn_addr);
+	if(olline>orline){
+  stab_binsearch(stabs,&lline,&rline,N_SLINE,addr);
+  // 如果在N_SLINE也没有找到
+  	if (lline>rline) {
+    	return -1;
+  	}
+	}
+	info->eip_line=stabs[lline].n_desc;
 
 
 	// Search backwards from the line number for the relevant filename

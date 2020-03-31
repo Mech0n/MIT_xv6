@@ -167,7 +167,7 @@ spin:	jmp	spin
 	.p2align	PGSHIFT		# force page alignment # log(PGSIZE) PGSIZE == 4K
 	.globl		bootstack
 bootstack:
-	.space		KSTKSIZE	# 8 * 4K(PGSIZE)
-	.globl		bootstacktop   
+	.space		KSTKSIZE	 # 申请KSTKSIZE字节的空间作为栈 # 8 * 4K(PGSIZE)
+	.globl		bootstacktop   # 定义变量 bootstacktop
 bootstacktop:
 

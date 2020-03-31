@@ -1,4 +1,4 @@
-# 笔记
+# Lab1-Excercise
 
 ###  Exercise 3
 
@@ -471,5 +471,204 @@ He110 World
   #define    va_end(ap)    ((void)0)
   ```
 
+
+### Exercise 9
+
+Determine where the kernel initializes its stack, and exactly where in memory its stack is located. How does the kernel reserve space for its stack? And at which "end" of this reserved area is the stack pointer initialized to point to?
+
+##### First
+
+```assembly
+# boot.S
+调用到内核时，设置了寄存器和栈指针。
+protcseg:
+  # Set up the protected-mode data segment registers
+  movw    $PROT_MODE_DSEG, %ax    # Our data segment selector
+  movw    %ax, %ds                # -> DS: Data Segment
+  movw    %ax, %es                # -> ES: Extra Segment
+  movw    %ax, %fs                # -> FS
+  movw    %ax, %gs                # -> GS
+  movw    %ax, %ss                # -> SS: Stack Segment
   
+  # Set up the stack pointer and call into C.
+  movl    $start, %esp
+  call bootmain
+```
+
+##### Second
+
+```assembly
+# entry.S
+relocated:
+
+	# Clear the frame pointer register (EBP)
+	# so that once we get into debugging C code,
+	# stack backtraces will be terminated properly.
+	# 清空帧指针(EBP)，以便运行c程序（待考证）
+	movl	$0x0,%ebp			# nuke frame pointer
+
+	# Set the stack pointer
+	# 设置栈指针 
+	movl	$(bootstacktop),%esp	# => 0xf0100034:    mov    $0xf0110000,%esp
+
+	# now to C code
+	call	i386_init	# => 0xf0100039:   call   0xf01000a6 <i386_init>
+```
+
+```assembly
+.data
+###################################################################
+# boot stack
+###################################################################
+	.p2align	PGSHIFT		# force page alignment # log(PGSIZE) PGSIZE == 4K
+	.globl		bootstack
+bootstack:
+	.space		KSTKSIZE	 # 申请KSTKSIZE字节的空间作为栈 # 8 * 4K(PGSIZE)
+	.globl		bootstacktop   # 定义变量 bootstacktop
+bootstacktop:
+```
+
+### Exercise 10
+
+To become familiar with the C calling conventions on the x86, find the address of the `test_backtrace` function in `obj/kern/kernel.asm`, set a breakpoint there, and examine what happens each time it gets called after the kernel starts. How many 32-bit words does each recursive nesting level of `test_backtrace` push on the stack, and what are those words?
+
+Note that, for this exercise to work properly, you should be using the patched version of QEMU available on the [tools](https://pdos.csail.mit.edu/6.828/2017/tools.html) page or on Athena. Otherwise, you'll have to manually translate all breakpoint and memory addresses to linear addresses.
+
+仔细看`test_backtrace`函数，观察调用函数调整栈空间，除去内部函数压栈弹栈。占用`0x14`字节，这些字分别是`0xc`预留、`eax`、`eip`。
+
+```assembly
+		test_backtrace(x-1);
+f0100095:	83 ec 0c             	sub    $0xc,%esp
+f0100098:	8d 46 ff             	lea    -0x1(%esi),%eax
+f010009b:	50                   	push   %eax
+f010009c:	e8 9f ff ff ff       	call   f0100040 <test_backtrace>
+f01000a1:	83 c4 10             	add    $0x10,%esp
+f01000a4:	eb d5                	jmp    f010007b <test_backtrace+0x3b>
+```
+
+内部，占用`0x8`字节：`ebp`、`esi`、`ebx`。
+
+```assembly
+// Test the stack backtrace function (lab 1 only)
+void
+test_backtrace(int x)
+{
+f0100040:	55                   	push   %ebp
+f0100041:	89 e5                	mov    %esp,%ebp
+f0100043:	56                   	push   %esi
+f0100044:	53                   	push   %ebx
+f0100045:	e8 72 01 00 00       	call   f01001bc <__x86.get_pc_thunk.bx>
+f010004a:	81 c3 be 12 01 00    	add    $0x112be,%ebx
+f0100050:	8b 75 08             	mov    0x8(%ebp),%esi
+	cprintf("entering test_backtrace %d\n", x);
+f0100053:	83 ec 08             	sub    $0x8,%esp
+f0100056:	56                   	push   %esi
+f0100057:	8d 83 f8 06 ff ff    	lea    -0xf908(%ebx),%eax
+f010005d:	50                   	push   %eax
+f010005e:	e8 e6 09 00 00       	call   f0100a49 <cprintf>
+	if (x > 0)
+f0100063:	83 c4 10             	add    $0x10,%esp
+f0100066:	85 f6                	test   %esi,%esi
+f0100068:	7f 2b                	jg     f0100095 <test_backtrace+0x55>
+		test_backtrace(x-1);
+	else
+		mon_backtrace(0, 0, 0);
+f010006a:	83 ec 04             	sub    $0x4,%esp
+f010006d:	6a 00                	push   $0x0
+f010006f:	6a 00                	push   $0x0
+f0100071:	6a 00                	push   $0x0
+f0100073:	e8 0b 08 00 00       	call   f0100883 <mon_backtrace>
+f0100078:	83 c4 10             	add    $0x10,%esp
+	cprintf("leaving test_backtrace %d\n", x);
+f010007b:	83 ec 08             	sub    $0x8,%esp
+f010007e:	56                   	push   %esi
+f010007f:	8d 83 14 07 ff ff    	lea    -0xf8ec(%ebx),%eax
+f0100085:	50                   	push   %eax
+f0100086:	e8 be 09 00 00       	call   f0100a49 <cprintf>
+}
+f010008b:	83 c4 10             	add    $0x10,%esp
+f010008e:	8d 65 f8             	lea    -0x8(%ebp),%esp
+f0100091:	5b                   	pop    %ebx
+f0100092:	5e                   	pop    %esi
+f0100093:	5d                   	pop    %ebp
+f0100094:	c3                   	ret    
+```
+
+```shell
+entering test_backtrace 5
+(gdb) x/8wx $esp - 0x20
+0xf010ffb0:     0x00000000      0xf0111308      0xf010ffd8   0xf0100a5b
+0xf010ffc0:     0xf0101a57      0xf010ffe4      0x00000000   0xf0111308
+```
+
+```shell
+entering test_backtrace 4
+(gdb) x/8wx $esp - 0x20
+0xf010ff90:     0xf01009f0      0xf0111308      0xf010ffb8      0xf0100a5b
+0xf010ffa0:     0xf0101a20      0xf010ffc4      0x00000000      0x00000000
+```
+
+```shell
+entering test_backtrace 3
+(gdb) x/8wx $esp - 0x20
+0xf010ff70:     0xf01009f0      0xf0111308      0xf010ff98      0xf0100a5b
+0xf010ff80:     0xf0101a20      0xf010ffa4      0xf010ffb8      0x00000000
+```
+
+```shell
+entering test_backtrace 2
+(gdb) x/8wx $esp - 0x20
+0xf010ff50:     0xf01009f0      0xf0111308      0xf010ff78      0xf0100a5b
+0xf010ff60:     0xf0101a20      0xf010ff84      0xf010ff98      0x00000000
+```
+
+```shell
+entering test_backtrace 1
+(gdb) x/8wx $esp - 0x20
+0xf010ff30:     0xf01009f0      0xf0111308      0xf010ff58      0xf0100a5b
+0xf010ff40:     0xf0101a20      0xf010ff64      0xf010ff78      0x00000000
+```
+
+```shell
+entering test_backtrace 0
+(gdb) x/8wx $esp - 0x20
+0xf010ff10:     0xf01009f0      0xf0111308      0xf010ff38      0xf0100a5b
+0xf010ff20:     0xf0101a20      0xf010ff44      0xf010ff58      0x00000000
+```
+
+### Exercise 11
+
+Implement the backtrace function as specified above. Use the same format as in the example, since otherwise the grading script will be confused. When you think you have it working right, run make grade to see if its output conforms to what our grading script expects, and fix it if it doesn't. *After* you have handed in your Lab 1 code, you are welcome to change the output format of the backtrace function any way you like.
+
+让我们打印信息（如下格式）：
+
+```c
+int
+mon_backtrace(int argc, char **argv, struct Trapframe *tf)
+{
+	// Your code here.
+	uint32_t *ebp = (uint32_t *)read_ebp();	//地址形式。
+	uint32_t eip = ebp[1];
+	uint32_t arg1= ebp[2];
+	uint32_t arg2 = ebp[3];
+	uint32_t arg3 = ebp[4];
+	uint32_t arg4 = ebp[5];
+	uint32_t arg5 = ebp[6];
+	cprintf("Stack backtrace:\n");
+	while(ebp)
+	{
+			cprintf("ebp %08x eip %08x args %08x %08x %08x %08x %08x\n",ebp,eip,arg1,arg2,arg3,arg4,arg5);
+			ebp = (uint32_t *)ebp[0];
+			eip = ebp[1];
+			arg1 = ebp[2];
+			arg2 = ebp[3];
+			arg3 = ebp[4];
+			arg4 = ebp[5];
+			arg5 = ebp[6];
+	}
+	return 0;
+}
+```
+
+### Exercise 12
 
