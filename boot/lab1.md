@@ -298,3 +298,178 @@ Idx Name          Size      VMA       LMA       File off  Algn
 原因就是在执行这条指令之前，还没有建立分页机制，高地址的内核区域还没有映射到内核的物理地址，只有低地址是有效的；执行完这条指令之后，开启了分页，由于有静态映射表（`kern/entrypgdir`）的存在，两块虚拟地址区域都映射到同一块物理地址区域。
 
 如果注释掉，第一条执行失败的命令是` 0x100031: mov $0xf0110000,%esp`，因为`0xf0110000`是高的虚拟地址，由于没有分页，CPU不知道访问哪一个物理地址。
+
+### Exercise 8
+
+仿照`%u`来改写：
+
+```c
+// unsigned decimal
+case 'u':
+  num = getuint(&ap, lflag);
+  base = 10;
+  goto number;
+
+// (unsigned) octal
+case 'o':
+  // Replace this with your code.
+  // putch('X', putdat);
+  // putch('X', putdat);
+  // putch('X', putdat);
+  num = getuint(&ap, lflag);
+  base = 8;
+  goto number;
+  // break;
+```
+
+效果
+
+```shell
+#before
+➜  lab git:(lab1) make qemu-nox
+***
+*** Use Ctrl-a x to exit qemu
+***
+qemu-system-i386 -nographic -drive file=obj/kern/kernel.img,index=0,media=disk,format=raw -serial mon:stdio -gdb tcp::25000 -D qemu.log
+6828 decimal is XXX octal!		#<===
+entering test_backtrace 5
+entering test_backtrace 4
+[···]
+
+#after
+➜  lab git:(lab1) ✗ make qemu-nox
+***
+*** Use Ctrl-a x to exit qemu
+***
+qemu-system-i386 -nographic -drive file=obj/kern/kernel.img,index=0,media=disk,format=raw -serial mon:stdio -gdb tcp::25000 -D qemu.log
+6828 decimal is 15254 octal!		#<===
+entering test_backtrace 5
+entering test_backtrace 4
+[···]
+```
+
+1. Explain the interface between `printf.c` and `console.c`. Specifically, what function does `console.c` export? How is this function used by `printf.c`?
+
+   `putch()/printf.c` ->`cputchar()/console.c`->`cons_putc()/console.c`->`[···]`
+
+2. Explain the following from `console.c`:
+
+   ```c
+   //console.h
+   #define CRT_SIZE	(CRT_ROWS * CRT_COLS) // 屏幕大小
+   #define CRT_ROWS	25
+   #define CRT_COLS	80
+   
+   //console.c
+   //如果输出位置crt_pos已经超出屏幕范围
+   if (crt_pos >= CRT_SIZE) {
+                 int i;
+     						//crt_buf存放屏幕指定位置的字符
+   					    // 通过这一行代码完成了整个屏幕向上移动一行的操作。
+                 memmove(crt_buf, crt_buf + CRT_COLS, (CRT_SIZE - CRT_COLS) * sizeof(uint16_t));
+     						//清空最后一行
+                 for (i = CRT_SIZE - CRT_COLS; i < CRT_SIZE; i++)
+                         crt_buf[i] = 0x0700 | ' ';
+                 crt_pos -= CRT_COLS;
+         }
+   ```
+
+3. For the following questions you might wish to consult the notes for Lecture 2. These notes cover GCC's calling convention on the x86.
+
+   Trace the execution of the following code step-by-step:
+
+   ```
+   int x = 1, y = 3, z = 4;
+   cprintf("x %d, y %x, z %d\n", x, y, z);
+   ```
+
+```c
+//va_arg
+typedef __builtin_va_list va_list;
+#define va_start(ap, last) __builtin_va_start(ap, last)
+#define va_arg(ap, type) __builtin_va_arg(ap, type)
+#define va_end(ap) __builtin_va_end(ap)
+```
+
+```c
+// 指针定义为char *可以指向任意一个内存地址。
+typedef char *va_list;
+// 类型大小，注意这里是与CPU位数对齐 ＝ sizeof(long)的作用。
+#define    __va_size(type) \
+    (((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
+// 这里个宏并不是取得参数的起始地址。而是说参数将从什么地址开始放。
+#define    va_start(ap, last) \
+    ((ap) = (va_list)&(last) + __va_size(last))
+// va_arg就是用来取参数的起始地址的。然后返回type类型。
+// 从整个表达式的意义来说没有什么好用的。
+// 其实等价于(*(type*)ap)
+// 但是实际上使ap指针移动一个参数大小。
+#define    va_arg(ap, type) \
+    (*(type *)((ap) += __va_size(type), (ap) - __va_size(type)))
+// 空指令，没有什么用
+#define    va_end(ap)    ((void)0)
+```
+
+
+
+- In the call to `cprintf()`, to what does `fmt` point? To what does `ap` point?
+
+`fmt = "x %d, y %x, z %d\n"`，`ap = （x, y, z)`
+
+`ap`第一次是`x`，然后是`y`，然后是`z`。直到`fmt`打印完毕。涉及到以上三个头文件的调用栈。
+
+- List (in order of execution) each call to `cons_putc`, `va_arg`, and `vcprintf`. For `cons_putc`, list its argument as well. For `va_arg`, list what `ap` points to before and after the call. For `vcprintf` list the values of its two arguments.
+
+`[···]`
+
+- Run the following code.
+
+```
+    unsigned int i = 0x00646c72;
+    cprintf("H%x Wo%s", 57616, &i);
+```
+
+```shell
+➜  ~ ./a.out
+He110 World
+```
+
+`%x`输出16进制数，而且`57616 = 0xe110`，
+
+`%s`输出`i`内的字符，按小端读取输出，即`0x72, 0x6c, 0x64 ==> r, l, d`
+
+大端读取`57616`不用修改，但是`i`需要按字节反序。
+
+- In the following code, what is going to be printed after `'y='`? (note: the answer is not a specific value.) Why does this happen?
+
+  `cprintf("x=%d y=%d", 3);`
+
+  `y`会打印栈上“第三个参数“位置的值，很有可能是个地址什么的。
+
+- Let's say that GCC changed its calling convention so that it pushed arguments on the stack in declaration order, so that the last argument is pushed last. How would you have to change `cprintf` or its interface so that it would still be possible to pass it a variable number of arguments?
+
+  引用这个解释吧：[reference](https://jiyou.github.io/blog/2018/04/15/mit.6.828/jos-lab1/)
+
+  之前认为GCC调用规则更改我们是不用多操作的。但是忘记了这里需要我们自己实现`cprintf()`，那就修改`va_arg`即相关宏定义呗。
+
+  ```c
+  / 指针定义为char *可以指向任意一个内存地址。
+  typedef char *va_list;
+  // 类型大小，注意这里是与CPU位数对齐 ＝ sizeof(long)的作用。
+  #define    __va_size(type) \
+      (((sizeof(type) + sizeof(long) - 1) / sizeof(long)) * sizeof(long))
+  // 这里个宏并不是取得参数的起始地址。而是说参数将从什么地址开始放。
+  #define    va_start(ap, last) \
+      ((ap) = (va_list)&(last) + __va_size(last))
+  // va_arg就是用来取参数的起始地址的。然后返回type类型。
+  // 从整个表达式的意义来说没有什么好用的。
+  // 其实等价于(*(type*)ap)
+  // 但是实际上使ap指针移动一个参数大小。
+  #define    va_arg(ap, type) \
+      (*(type *)((ap) += __va_size(type), (ap) - __va_size(type)))
+  // 空指令，没有什么用
+  #define    va_end(ap)    ((void)0)
+  ```
+
+  
+

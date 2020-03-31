@@ -192,12 +192,15 @@ cga_putc(int c)
 	}
 
 	// What is the purpose of this?
+	//如果输出位置crt_pos已经超出屏幕范围，整个屏幕向上滚动一行
 	if (crt_pos >= CRT_SIZE) {
 		int i;
-
+		//向上屏幕滚动一行
 		memmove(crt_buf, crt_buf + CRT_COLS, (CRT_SIZE - CRT_COLS) * sizeof(uint16_t));
+		//清空最后一行
 		for (i = CRT_SIZE - CRT_COLS; i < CRT_SIZE; i++)
 			crt_buf[i] = 0x0700 | ' ';
+		//设置光标位置
 		crt_pos -= CRT_COLS;
 	}
 
