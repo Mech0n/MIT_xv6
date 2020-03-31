@@ -132,9 +132,9 @@ entry:
 	# Turn on paging.
 	movl	%cr0, %eax
 	orl	$(CR0_PE|CR0_PG|CR0_WP), %eax	# 开启 PE PG WP
-	movl	%eax, %cr0									# PE	32位保护模式 Protected Mode Enable
-																		# WP	写保护 Write protect
-																		# PG	开启分页 $cr3寄存器启用 Paging
+	movl	%eax, %cr0			# PE	32位保护模式 Protected Mode Enable
+						# WP	写保护 Write protect
+						# PG	开启分页 $cr3寄存器启用 Paging
 	# Now paging is enabled, but we're still running at a low EIP
 	# (why is this okay?).  Jump up above KERNBASE before entering
 	# C code.
