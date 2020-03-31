@@ -1,5 +1,7 @@
 # 笔记
 
+###  Exercise 3
+
 Be able to answer the following questions:
 
 - At what point does the processor start executing 32-bit code? What exactly causes the switch from 16- to 32-bit mode?
@@ -118,5 +120,98 @@ Be able to answer the following questions:
 
   此数据成员给出本段内容在文件中的位置，即段内容的开始位置相对于文件 开头的偏移量。
 
+  ### Exercise 4
   
-
+  ##### 0x1 
+  
+  ```c
+  // 这里有个少用的方法。
+  c[1] = 300;
+  *(c + 2) = 301;
+  3[c] = 302; // == c[3]
+  printf("3: a[0] = %d, a[1] = %d, a[2] = %d, a[3] = %d\n",
+         a[0], a[1], a[2], a[3]);
+  ```
+  
+  ```assembly
+  |           0x00000795      488b45d8       mov rax, qword [local_28h]
+  |           0x00000799      4883c004       add rax, 4
+  |           0x0000079d      c7002c010000   mov dword [rax], 0x12c      ; [0x12c:4]=0
+  |           0x000007a3      488b45d8       mov rax, qword [local_28h]
+  |           0x000007a7      4883c008       add rax, 8
+  |           0x000007ab      c7002d010000   mov dword [rax], 0x12d      ; [0x12d:4]=0xb8000000
+  |           0x000007b1      488b45d8       mov rax, qword [local_28h]
+  |           0x000007b5      4883c00c       add rax, 0xc
+  |           0x000007b9      c7002e010000   mov dword [rax], 0x12e      ; [0x12e:4]=0xdb80000
+  |           0x000007bf      8b75ec         mov esi, dword [local_14h]
+  |           0x000007c2      8b4de8         mov ecx, dword [local_18h]
+  |           0x000007c5      8b55e4         mov edx, dword [local_1ch]
+  |           0x000007c8      8b45e0         mov eax, dword [local_20h]
+  |           0x000007cb      4189f0         mov r8d, esi
+  |           0x000007ce      89c6           mov esi, eax
+  |           0x000007d0      488d3db10100.  lea rdi, qword str.3:_a_0_____d__a_1_____d__a_2_____d__a_3_____d ; 0x988 ; "3: a[0] = %d, a[1] = %d, a[2] = %d, a[3] = %d\n"
+  ```
+  
+  这里会发现`3[c]`等同`c[3]`，即`3[c] = *(c+3) = *(c+3) = c[3]`。
+  
+  ```shell
+  pwndbg>
+  3: a[0] = 200, a[1] = 300, a[2] = 301, a[3] = 302
+  ```
+  
+  ##### 0x2
+  
+  ```c
+  c = (int *) ((char *) c + 1);
+  *c = 500;
+  printf("5: a[0] = %d, a[1] = %d, a[2] = %d, a[3] = %d\n",
+  ```
+  
+  ```assembly
+  |           0x00000812      488345d801     add qword [local_28h], 1
+  |           0x00000817      488b45d8       mov rax, qword [local_28h]
+  |           0x0000081b      c700f4010000   mov dword [rax], 0x1f4      ; [0x1f4:4]=0
+  |           0x00000821      8b75ec         mov esi, dword [local_14h]
+  |           0x00000824      8b4de8         mov ecx, dword [local_18h]
+  |           0x00000827      8b55e4         mov edx, dword [local_1ch]
+  |           0x0000082a      8b45e0         mov eax, dword [local_20h]
+  |           0x0000082d      4189f0         mov r8d, esi
+  |           0x00000830      89c6           mov esi, eax
+  |           0x00000832      488d3daf0100.  lea rdi, qword str.5:_a_0_____d__a_1_____d__a_2_____d__a_3_____d ; 0x9e8 ; "5: a[0] = %d, a[1] = %d, a[2] = %d, a[3] = %d\n"
+  ```
+  
+  `0x0000081b`之前：
+  
+  ```shell
+  pwndbg> x/4wx $rax - 1
+  0x7fffffffe414: 0x00000190      0x0000012d      0x0000012e      0xf7de59a0
+  ```
+  
+  `0x0000081b`之后：
+  
+  ```shell
+  pwndbg> x/4wx $rax - 1
+  0x7fffffffe414: 0x0001f490      0x00000100      0x0000012e      0xf7de59a0
+  pwndbg> print 0x1f490
+  $4 = 128144
+  ```
+  
+  ```shell
+  4: a[0] = 200, a[1] = 400, a[2] = 301, a[3] = 302
+  5: a[0] = 200, a[1] = 128144, a[2] = 256, a[3] = 302
+  ```
+  
+  ##### 0x3
+  
+  ```c
+  b = (int *) a + 1;
+  c = (int *) ((char *) a + 1);
+  printf("6: a = %p, b = %p, c = %p\n", a, b, c);
+  ```
+  
+  ```shell
+  //与第五个输出同理
+  6: a = 0x7ffe7e869b30, b = 0x7ffe7e869b34, c = 0x7ffe7e869b31
+  ```
+  
+  
