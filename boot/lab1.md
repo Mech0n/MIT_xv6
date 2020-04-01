@@ -672,3 +672,122 @@ mon_backtrace(int argc, char **argv, struct Trapframe *tf)
 
 ### Exercise 12
 
+关于[STAB](https://sourceware.org/gdb/current/onlinedocs/stabs.html)，可以看一下[wiki](https://en.wikipedia.org/wiki/Stabs)。
+
+```c
+// Entries in the STABS table are formatted as follows.
+struct Stab {
+	uint32_t n_strx;	// index into string table of name
+	uint8_t n_type;         // type of symbol
+	uint8_t n_other;        // misc info (usually empty)
+	uint16_t n_desc;        // description field
+	uintptr_t n_value;	// value of symbol
+};
+```
+
+MIT很贴心的给了提示：
+
+In debuginfo_eip, where do `__STAB_* `come from? This question has a long answer; to help you to discover the answer, here are some things you might want to do:
+
+look in the file` kern/kernel.ld` for` __STAB_*`
+run `objdump -h obj/kern/kernel`
+run `objdump -G obj/kern/kernel`
+run `gcc -pipe -nostdinc -O2 -fno-builtin -I. -MD -Wall -Wno-format -DJOS_KERNEL -gstabs -c -S kern/init.c`, and look at` init.s`.
+see if the bootloader loads the symbol table in memory as part of loading the kernel binary
+
+我截取了一部分内容（太长了）：
+
+```assembly
+#➜  lab git:(lab1) ✗ objdump -G obj/kern/kernel > cat_stab
+obj/kern/kernel:     file format elf32-i386
+
+Contents of .stab section:
+
+Symnum n_type n_othr n_desc n_value  n_strx String
+
+-1     HdrSym 0      1320   000019a2 1     
+0      SO     0      0      f0100000 1      {standard input}
+1      SOL    0      0      f010000c 18     kern/entry.S
+2      SLINE  0      44     f010000c 0      
+3      SLINE  0      57     f0100015 0      
+4      SLINE  0      58     f010001a 0      
+5      SLINE  0      60     f010001d 0      
+6      SLINE  0      61     f0100020 0      
+7      SLINE  0      62     f0100025 0      
+[···]
+284    SLINE  0      167    0000009d 0      
+285    SLINE  0      169    000000aa 0      
+286    SLINE  0      180    000000cd 0      
+287    SLINE  0      195    000000ea 0      
+288    SLINE  0      205    000000f9 0      
+289    SOL    0      0      f010045b 3135   ./inc/x86.h
+290    SLINE  0      66     000000ff 0      
+291    SOL    0      0      f0100463 3120   kern/console.c
+292    SLINE  0      206    00000107 0      
+293    SOL    0      0      f0100473 3135   ./inc/x86.h
+294    SLINE  0      66     00000117 0      
+295    SOL    0      0      f0100483 3120   kern/console.c
+296    SLINE  0      438    00000127 0      
+297    SLINE  0      169    0000012f 0      
+298    SLINE  0      171    00000134 0      
+299    SLINE  0      172    00000140 0      
+300    SLINE  0      173    0000014a 0      
+```
+
+可以看到`SLINE`中的地址都是函数内偏移，这就可以解释`addr -= info->eip_fn_addr;(kern/kdebug.c)`了。
+
+~~我们看到。如果是汇编文件，`SLINE`是绝对地址。~~
+
+而关于`stab_binsearch`，`kern/kdebug.c`里的注释写的很详细。
+
+所以我们在确定了函数位置之后直接查找函数内语句的位置即可（偷懒）：
+
+```c
+stab_binsearch(stabs, &lline, &rline, N_SLINE, addr);
+  if(lline <= rline)
+    info->eip_line = stabs[lline].n_desc;
+  else
+    info->eip_line = -1;
+```
+
+其实严谨一点，可以参考[这个博客很可爱的大佬写的]([https://blog.cilicili.xyz/2020/02/13/record-mitjos-lab1/#%E5%86%85%E6%A0%B8](https://blog.cilicili.xyz/2020/02/13/record-mitjos-lab1/#内核))
+
+```c
+int olline = lline, orline = rline;
+stab_binsearch(stabs, &olline, &orline, N_SOL, (!(lline == lfile && rline == rfile))*addr + info->eip_fn_addr);
+
+if(olline>orline){
+stab_binsearch(stabs,&lline,&rline,N_SLINE,addr);
+// 如果在N_SLINE也没有找到
+if (lline>rline) {
+  return -1;
+}
+}
+// 记录找到的行号
+info->eip_line=stabs[lline].n_desc;
+```
+
+至于在终端加入一条`backtrace`命令就很简单了，
+
+只要在`static struct Command commands[]/kern/monitor.c`里加一条语句即可：
+
+```c
+static struct Command commands[] = {
+	{ "help", "Display this list of commands", mon_help },
+	{ "kerninfo", "Display information about the kernel", mon_kerninfo },
+	{ "backtrace", "Display information about the eip debug info", mon_backtrace},//<====
+};
+```
+
+```shell
+K> backtrace
+Stack backtrace:
+ebp f010ff58 eip f0100ac1 args 00000001 f010ff80 00000000 f0100b25 f0100ad4
+kern/monitor.c:151: monitor+332
+ebp f010ffd8 eip f0100101 args 00000000 00001aac 00000640 00000000 00000000
+kern/init.c:43: i386_init+91
+ebp f010fff8 eip f010003e args 00000023 00001003 00002003 00003003 00004003
+kern/entry.S:83: <unknown>+0
+K> QEMU: Terminated
+```
+
