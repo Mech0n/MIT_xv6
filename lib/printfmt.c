@@ -17,7 +17,7 @@
  * The integer may be positive or negative,
  * so that -E_NO_MEM and E_NO_MEM are equivalent.
  */
-
+ // error 字符串
 static const char * const error_string[MAXERROR] =
 {
 	[E_UNSPECIFIED]	= "unspecified error",
@@ -32,6 +32,7 @@ static const char * const error_string[MAXERROR] =
  * Print a number (base <= 16) in reverse order,
  * using specified putch function and associated pointer putdat.
  */
+//16进制以内以相反的顺序打印数字
 static void
 printnum(void (*putch)(int, void*), void *putdat,
 	 unsigned long long num, unsigned base, int width, int padc)
@@ -206,10 +207,13 @@ vprintfmt(void (*putch)(int, void*), void *putdat, const char *fmt, va_list ap)
 		// (unsigned) octal
 		case 'o':
 			// Replace this with your code.
-			putch('X', putdat);
-			putch('X', putdat);
-			putch('X', putdat);
-			break;
+			// putch('X', putdat);
+			// putch('X', putdat);
+			// putch('X', putdat);
+			num = getuint(&ap, lflag);
+			base = 8;
+			goto number;
+			// break;
 
 		// pointer
 		case 'p':
