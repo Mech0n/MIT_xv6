@@ -83,6 +83,37 @@
  */
 
 
+// +------------------+  <- 0xFFFFFFFF (4GB)
+// |      32-bit      |
+// |  memory mapped   |
+// |     devices      |
+// |                  |
+// /\/\/\/\/\/\/\/\/\/\
+
+// /\/\/\/\/\/\/\/\/\/\
+// |                  |
+// |      Unused      |
+// |                  |
+// +------------------+  <- depends on amount of RAM
+// |                  |
+// |                  |
+// | Extended Memory  |
+// |                  |
+// |                  |
+// +------------------+  <- 0x00100000 (1MB)
+// |     BIOS ROM     |
+// +------------------+  <- 0x000F0000 (960KB)
+// |  16-bit devices, |
+// |  expansion ROMs  |
+// +------------------+  <- 0x000C0000 (768KB)
+// |   VGA Display    |
+// +------------------+  <- 0x000A0000 (640KB)
+// |                  |
+// |    Low Memory    |
+// |                  |
+// +------------------+  <- 0x00000000
+
+
 // All physical memory mapped at this address
 #define	KERNBASE	0xF0000000
 
@@ -98,7 +129,7 @@
 #define KSTKGAP		(8*PGSIZE)   		// size of a kernel stack guard
 
 // Memory-mapped IO.
-#define MMIOLIM		(KSTACKTOP - PTSIZE)
+#define MMIOLIM		(KSTACKTOP - PTSIZE)		// #define PTSIZE		(PGSIZE*NPTENTRIES) //(PGSIZE * 1024)
 #define MMIOBASE	(MMIOLIM - PTSIZE)
 
 #define ULIM		(MMIOBASE)
