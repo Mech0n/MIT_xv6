@@ -22,6 +22,7 @@ extern pde_t *kern_pgdir;
  * and returns the corresponding physical address.  It panics if you pass it a
  * non-kernel virtual address.
  */
+// kernel virtual addr -> physical addr
 #define PADDR(kva) _paddr(__FILE__, __LINE__, kva)
 
 static inline physaddr_t
@@ -34,6 +35,7 @@ _paddr(const char *file, int line, void *kva)
 
 /* This macro takes a physical address and returns the corresponding kernel
  * virtual address.  It panics if you pass an invalid physical address. */
+// physical addr -> kernel addr
 #define KADDR(pa) _kaddr(__FILE__, __LINE__, pa)
 
 static inline void*
@@ -62,12 +64,14 @@ void	page_decref(struct PageInfo *pp);
 
 void	tlb_invalidate(pde_t *pgdir, void *va);
 
+// page(struct PageInfo*) -> physical addr 
 static inline physaddr_t
 page2pa(struct PageInfo *pp)
 {
 	return (pp - pages) << PGSHIFT;
 }
 
+// physical addr -> page(struct PageInfo*)
 static inline struct PageInfo*
 pa2page(physaddr_t pa)
 {
@@ -76,6 +80,7 @@ pa2page(physaddr_t pa)
 	return &pages[PGNUM(pa)];
 }
 
+//page(struct PageInfo*) -> kernel virtual addr
 static inline void*
 page2kva(struct PageInfo *pp)
 {

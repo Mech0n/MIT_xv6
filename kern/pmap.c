@@ -341,7 +341,7 @@ page_alloc(int alloc_flags)
 		memset(page2kva(pp), 0, PGSIZE);
 	}
 	page_free_list = pp->pp_link;
-	pp->pp_link = 0;
+	pp->pp_link = NULL;
 	return pp;	
 }
 
@@ -526,9 +526,12 @@ check_page_free_list(bool only_low_memory)
 	if (only_low_memory) {
 		// Move pages with lower addresses first in the free
 		// list, since entry_pgdir does not map all pages.
+		// 由于entry_pgdir不会映射所有页面，因此请先在空闲列表中移动地址较低的页面。
+		// 如果only_low_memory == 1 ,那么只检查PDX == 0的page。也就是包含entry_pgdir的Page Dictionary。
 		struct PageInfo *pp1, *pp2;
 		struct PageInfo **tp[2] = { &pp1, &pp2 };
 		for (pp = page_free_list; pp; pp = pp->pp_link) {
+			// 如果不是这个 Page Dictionary 的 page 就跳过
 			int pagetype = PDX(page2pa(pp)) >= pdx_limit;
 			*tp[pagetype] = pp;
 			tp[pagetype] = &pp->pp_link;

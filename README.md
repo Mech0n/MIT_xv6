@@ -6,7 +6,7 @@
 
 #### 【2020-04-07】
 
-学习`pmap.c`、`memlayout.h`
+学习`pmap.c`、`memlayout.h`、`pmap.h`，~~根据自己的理解做了详细注释~~
 
 ### 练习前梳理
 
@@ -136,4 +136,80 @@ struct PageInfo {
 pages = (struct PageInfo *) boot_alloc(npages * sizeof(struct PageInfo));
 memset(pages, 0, npages * sizeof(struct PageInfo));
 ```
+
+随后需要进入并完成`page_init()`函数：
+
+根据要求把这几项提示完成即可：
+
+```c
+	size_t i;
+	page_free_list = NULL;
+
+	// 已分配使用部分(extmem)
+	int num_alloc = ((uint32_t)boot_alloc(0) - KERNBASE) / PGSIZE;
+	//IO部分 384K
+	int num_IOhole = (EXTPHYSMEM - IOPHYSMEM) / PGSIZE;
+
+	// page 0
+	pages[0].pp_ref = 1;
+	// last base memory 
+	for(i = 1; i < npages_basemem; i++)
+	{
+		pages[i].pp_ref = 0;
+		pages[i].pp_link = page_free_list;
+		page_free_list = &pages[i];
+	}
+	// alloc / IO hole 
+	for(i = npages_basemem; i < npages_basemem + num_IOhole + num_alloc; i++)
+  	pages[i].pp_ref = 1;
+	// last
+	for(; i < npages; i++)
+	{
+		pages[i].pp_ref = 0;
+		pages[i].pp_link = page_free_list;
+		page_free_list = &pages[i];
+	}
+```
+
+此时，`page_free_list`链表指向地址最高的`free page`
+
+最后进入`check_page_free_list()`函数来测试。~~参数`1`指定了包含`entry_pgdir`的`Page Dictionary`。~~
+
+然后是`page_alloc()`、`page_free()`
+
+```c
+struct PageInfo *
+page_alloc(int alloc_flags)
+{
+	// Fill this function in
+	if(!page_free_list)
+		return NULL;
+	struct PageInfo *pp = page_free_list;
+	if(alloc_flags & ALLOC_ZERO) {
+		memset(page2kva(pp), 0, PGSIZE);
+	}
+	page_free_list = pp->pp_link;
+	pp->pp_link = NULL;
+	return pp;	
+}
+
+void
+page_free(struct PageInfo *pp)
+{
+	// Fill this function in
+	// Hint: You may want to panic if pp->pp_ref is nonzero or
+	// pp->pp_link is not NULL.
+	if(pp->pp_ref != 0)
+		panic("pp->pp_ref is nonzero\n");
+	if(pp->pp_link)
+		panic("pp->pp_link is not NULL\n");
+
+	pp->pp_link = page_free_list;
+	page_free_list = pp;
+}
+```
+
+
+
+
 
