@@ -8,6 +8,10 @@
 
 学习`pmap.c`、`memlayout.h`、`pmap.h`，~~根据自己的理解做了详细注释~~
 
+#### 【2020-04-10】
+
+ [Intel 80386 Reference Manual](https://pdos.csail.mit.edu/6.828/2017/readings/i386/toc.htm) : 5-2 、6-4
+
 ### 练习前梳理
 
 引用一张图，图像化展示内存布局(复习一下lab1)：
@@ -209,7 +213,24 @@ page_free(struct PageInfo *pp)
 }
 ```
 
+#### Exercise 2
 
+详见[sources](./sources/)
+
+在x86术语中，**虚拟地址**由 段选择器 `segment selector` 和段内的偏移量 `offset` 组成。 **线性地址**是您在分段翻译 `segment translation` 之后, 页面翻译 ` page translation` 之前获得的。 **物理地址**是在段和页面翻译之后最终得到的，最终在硬件总线上抵达RAM的内容。
+
+```shell
+
+           Selector  +--------------+         +-----------+
+          ---------->|              |         |           |
+                     | Segmentation |         |  Paging   |
+Software             |              |-------->|           |---------->  RAM
+            Offset   |  Mechanism   |         | Mechanism |
+          ---------->|              |         |           |
+                     +--------------+         +-----------+
+            Virtual                   Linear                Physical
+
+```
 
 
 
