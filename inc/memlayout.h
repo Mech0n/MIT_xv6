@@ -135,7 +135,7 @@
 #define ULIM		(MMIOBASE)
 
 /*
- * User read-only mappings! Anything below here til UTOP are readonly to user.
+ * User read-only mappings! Anything below here til UTOP are read only to user.
  * They are global pages mapped in at env allocation time.
  */
 
