@@ -121,7 +121,7 @@ boot_alloc(uint32_t n)
 
 // Set up a two-level page table: // 设置两级页表：
 //    kern_pgdir is its linear (virtual) address of the root
-//		kern_pgdir 是根的（虚拟）线性地址
+//		kern_pgdir 是（虚拟）线性地址
 // This function only sets up the kernel part of the address space
 // 此函数仅设置地址空间的内核部分，即地址 >= UTOP，地址空间的用户部分稍后再设置。
 // (ie. addresses >= UTOP).  The user part of the address space
@@ -170,6 +170,8 @@ void mem_init(void)
 	// array.  'npages' is the number of physical pages in memory.  Use memset
 	// to initialize all fields of each struct PageInfo to 0.
 	// Your code goes here:
+
+	// Allocate an array of npages 'struct PageInfo's and store it in 'pages'.
 	pages = (struct PageInfo *)boot_alloc(npages * sizeof(struct PageInfo));
 	memset(pages, 0, npages * sizeof(struct PageInfo));
 
@@ -196,6 +198,9 @@ void mem_init(void)
 	//    - pages itself -- kernel RW, user NONE
 	// Your code goes here:
 
+	// Map 'pages' read-only by the user at linear address UPAGES
+	boot_map_region(kern_pgdir, UPAGES, PTSIZE, PADDR(pages), PTE_U);
+
 	//////////////////////////////////////////////////////////////////////
 	// Use the physical memory that 'bootstack' refers to as the kernel
 	// stack.  The kernel stack grows down from virtual address KSTACKTOP.
@@ -208,6 +213,10 @@ void mem_init(void)
 	//     Permissions: kernel RW, user NONE
 	// Your code goes here:
 
+	// Use the physical memory that 'bootstack' refers to as the kernel
+	// stack.  The kernel stack grows down from virtual address KSTACKTOP.
+	boot_map_region(kern_pgdir, KSTACKTOP - KSTKSIZE, KSTKSIZE, PADDR(bootstack), PTE_W);	
+
 	//////////////////////////////////////////////////////////////////////
 	// Map all of physical memory at KERNBASE.
 	// Ie.  the VA range [KERNBASE, 2^32) should map to
@@ -216,6 +225,9 @@ void mem_init(void)
 	// we just set up the mapping anyway.
 	// Permissions: kernel RW, user NONE
 	// Your code goes here:
+
+	// Map all of physical memory at KERNBASE.
+	boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W);
 
 	// Check that the initial page directory has been set up correctly.
 	check_kern_pgdir();
@@ -394,6 +406,8 @@ void page_decref(struct PageInfo *pp)
 // Hint 3: look at inc/mmu.h for useful macros that manipulate page
 // table and page directory entries.
 //
+
+// va -> a pointer to the page table entry (PTE) for linear address 'va'
 pte_t *
 pgdir_walk(pde_t *pgdir, const void *va, int create)
 {
@@ -432,6 +446,8 @@ pgdir_walk(pde_t *pgdir, const void *va, int create)
 // mapped pages.
 //
 // Hint: the TA solution uses pgdir_walk
+
+// Map [va, va+size) of virtual address space to physical [pa, pa+size), in the page table rooted at pgdir. 
 static void
 boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
 {
@@ -508,6 +524,8 @@ int page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 //
 // Hint: the TA solution uses pgdir_walk and pa2page.
 //
+
+//Return the page mapped at virtual address 'va'.
 struct PageInfo *
 page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 {
@@ -538,6 +556,8 @@ page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
 // Hint: The TA solution is implemented using page_lookup,
 // 	tlb_invalidate, and page_decref.
 //
+
+// Unmaps the physical page at virtual address 'va'.
 void page_remove(pde_t *pgdir, void *va)
 {
 	// Fill this function in

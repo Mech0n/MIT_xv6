@@ -52,6 +52,70 @@
 |                  |
 +------------------+  <- 0x00000000
 
+
+/*
+ * Virtual memory map:                                Permissions
+ *                                                    kernel/user
+ *
+ *    4 Gig -------->  +------------------------------+
+ *                     |                              | RW/--
+ *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *                     :              .               :
+ *                     :              .               :
+ *                     :              .               :
+ *                     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~| RW/--
+ *                     |                              | RW/--
+ *                     |   Remapped Physical Memory   | RW/--
+ *                     |                              | RW/--
+ *    KERNBASE, ---->  +------------------------------+ 0xf0000000      --+
+ *    KSTACKTOP        |     CPU0's Kernel Stack      | RW/--  KSTKSIZE   |
+ *                     | - - - - - - - - - - - - - - -|                   |
+ *                     |      Invalid Memory (*)      | --/--  KSTKGAP    |
+ *                     +------------------------------+                   |
+ *                     |     CPU1's Kernel Stack      | RW/--  KSTKSIZE   |
+ *                     | - - - - - - - - - - - - - - -|                 PTSIZE
+ *                     |      Invalid Memory (*)      | --/--  KSTKGAP    |
+ *                     +------------------------------+                   |
+ *                     :              .               :                   |
+ *                     :              .               :                   |
+ *    MMIOLIM ------>  +------------------------------+ 0xefc00000      --+
+ *                     |       Memory-mapped I/O      | RW/--  PTSIZE
+ * ULIM, MMIOBASE -->  +------------------------------+ 0xef800000
+ *                     |  Cur. Page Table (User R-)   | R-/R-  PTSIZE
+ *    UVPT      ---->  +------------------------------+ 0xef400000
+ *                     |          RO PAGES            | R-/R-  PTSIZE
+ *    UPAGES    ---->  +------------------------------+ 0xef000000
+ *                     |           RO ENVS            | R-/R-  PTSIZE
+ * UTOP,UENVS ------>  +------------------------------+ 0xeec00000
+ * UXSTACKTOP -/       |     User Exception Stack     | RW/RW  PGSIZE
+ *                     +------------------------------+ 0xeebff000
+ *                     |       Empty Memory (*)       | --/--  PGSIZE
+ *    USTACKTOP  --->  +------------------------------+ 0xeebfe000
+ *                     |      Normal User Stack       | RW/RW  PGSIZE
+ *                     +------------------------------+ 0xeebfd000
+ *                     |                              |
+ *                     |                              |
+ *                     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ *                     .                              .
+ *                     .                              .
+ *                     .                              .
+ *                     |~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~|
+ *                     |     Program Data & Heap      |
+ *    UTEXT -------->  +------------------------------+ 0x00800000
+ *    PFTEMP ------->  |       Empty Memory (*)       |        PTSIZE
+ *                     |                              |
+ *    UTEMP -------->  +------------------------------+ 0x00400000      --+
+ *                     |       Empty Memory (*)       |                   |
+ *                     | - - - - - - - - - - - - - - -|                   |
+ *                     |  User STAB Data (optional)   |                 PTSIZE
+ *    USTABDATA ---->  +------------------------------+ 0x00200000        |
+ *                     |       Empty Memory (*)       |                   |
+ *    0 ------------>  +------------------------------+                 --+
+ *
+ * (*) Note: The kernel ensures that "Invalid Memory" is *never* mapped.
+ *     "Empty Memory" is normally unmapped, but user programs may map pages
+ *     there if desired.  JOS user programs map pages temporarily at UTEMP.
+ */
 ```
 
 在进行实验之前，我们通过`boot.S`的`call bootmain`转移到了`bootmain(boot/main.c)`的`((void (*)(void)) (ELFHDR->e_entry))();`然后进入内核`entry.S`的`call i386_init`来到了目前的练习。
@@ -241,6 +305,11 @@ C指针是虚拟地址的`offset`部分。 **在`boot / boot.S`中，我们设�
 回想一下，在lab1 Part 3中，我们设置了一个简单的`page table`，以便内核可以实际上以其链接地址`0xf0100000`运行，即使该内核实际上已加载到ROM BIOS上方的物理内存中，即`0x00100000`。 该`page table`仅映射了`4MB`的内存。 在本lab中，您将在虚拟地址空间布局中为JOS进行设置，**我们将对其进行扩展以映射从虚拟地址`0xf0000000`开始的前256MB物理内存，并映射虚拟地址空间的许多其他区域。**
 
 从在CPU上执行的代码开始，一旦进入保护模式（我们在`boot / boot.S`中输入了第一件事），就无法直接使用线性或物理地址。 **所有内存引用都被解释为虚拟地址，并由`MMU`转换，这意味着C中的所有指针都是虚拟地址。**
+
+操作系统和MMU是这样配合的：
+
+1. 操作系统在初始化或分配、释放内存时会执行一些指令在物理内存中填写页表，然后用指令设置MMU，告诉MMU页表在物理内存中的什么位置。
+2. 设置好之后，CPU每次执行访问内存的指令都会自动引发MMU做查表和地址转换操作，地址转换操作由硬件自动完成，不需要用指令控制MMU去做。
 
 JOS内核通常需要将地址作为不透明值或整数进行操作，而无需在例如物理内存分配器中对其进行反引用。 有时这些是虚拟地址，有时是物理地址。
 
@@ -495,4 +564,104 @@ int page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
 	return 0;
 }
 ```
+
+### Exercise 5
+
+JOS将处理器的32位线性地址空间分为两部分。 我们将在实验3中开始加载和运行的用户环境（进程）将控制下部的布局和内容，而内核始终保持对上部的完全控制。 分界线由inc / memlayout.h中的ULIM符号任意定义，为内核保留了大约256MB的虚拟地址空间。 这就解释了为什么我们需要在实验1中为内核提供如此高的链接地址：否则，内核的虚拟地址空间中就没有足够的空间可以同时在其下面的用户环境中进行映射。
+
+#### 权限和故障隔离
+
+Permissions and Fault Isolation
+
+由于内核和用户内存都存在于每个环境的地址空间中，因此我们必须在x86页表中使用权限位，以允许用户仅访问地址空间的用户部分。 否则用户代码中的bug可能会覆盖内核数据，从而导致崩溃或更微妙的故障; 或者也可能窃取其他环境的私有数据。 请注意，可写权限位`PTE_W`会对用户和内核代码均有效！
+
+`ULIM`以上内存用户没有任何权限，而内核能够拥有读写权限。 对于地址范围`[UTOP，ULIM)`，内核和用户环境都具有相同的权限：它们可以读取但不能写入此地址范围。 此范围的地址用于将某些内核数据结构以只读方式暴露给用户环境。 最后，`UTOP`下面的地址空间供用户环境使用; 用户环境将设置访问此内存的权限。
+
+#### 初始化内核地址空间
+
+Initializing the Kernel Address Space
+
+现在你将设置`UTOP`上方的地址空间——地址空间的内核部分。 `inc/memlayout.h`显示了你应该使用的布局。 您将使用刚刚编写的函数来设置适当的线性到物理的映射。
+
+**Exercise 5.** Fill in the missing code in `mem_init()` after the call to `check_page()`.
+
+Your code should now pass the `check_kern_pgdir()` and `check_page_installed_pgdir()` checks.
+
+
+
+- 从 `UPAGES` 开始，往上 `PTSIZE` 范围的地址空间，可以看到其对用户和内核均为只读
+
+  ```c
+  boot_map_region(kern_pgdir, UPAGES, PTSIZE, PADDR(pages), PTE_U);
+  ```
+
+- `bootstack`: 由注释可知，该部分的空间范围为`[KSTACKTOP-KSTKSIZE, KSTACKTOP)`，即从 `KSTACKTOP-KSTKSIZE` 开始往上的 `KSTKSIZE` 大小的空间，可以看到内核具有读写权限，用户没有访问权限
+
+  ```c
+  boot_map_region(kern_pgdir, KSTACKTOP-KSTKSIZE, KSTKSIZE, PADDR(bootstack), PTE_W);
+  ```
+
+- 所有的物理内存，即从 `KERNBASE` 开始的 `32bit` 能表示的最大地址 232−1232−1, 因此其尺寸恰好为 负数以2的补码表示下的 `-KERNBASE` ； 可以看到对于这部分空间，内核具有读写权限，用户没有权限。
+
+  ```c
+  boot_map_region(kern_pgdir, KERNBASE, -KERNBASE, 0, PTE_W);
+  ```
+
+
+
+Revisit the page table setup in `kern/entry.S` and `kern/entrypgdir.c`. Immediately after we turn on paging, EIP is still a low number (a little over 1MB). At what point do we transition to running at an EIP above KERNBASE? What makes it possible for us to continue executing at a low EIP between when we enable paging and when we begin running at an EIP above KERNBASE? Why is this transition necessary?
+
+从 `kern/entry.S` 中的 `jmp *%eax` 语句开始，系统便跳转到高地址运行。因为在 `entry.S` 中我们的`CR3` 加载的是 `entry_pgdir`，它将物理地址 `[0, 4M)`同时映射到了虚拟地址的 `[0, 4M)` 和`[KERNBASE, KERNBASE+4M)`，所以能保证正常运行。而新的`kern_pgdir`加载后，并没有映射低位的虚拟地址 `[0, 4M)`，所以这一步跳转是必要的。
+
+> *Challenge!* Extend the JOS kernel monitor with commands to:
+>
+> - Display in a useful and easy-to-read format all of the physical page mappings (or lack thereof) that apply to a particular range of virtual/linear addresses in the currently active address space. For example, you might enter `'showmappings 0x3000 0x5000'` to display the physical page mappings and corresponding permission bits that apply to the pages at virtual addresses 0x3000, 0x4000, and 0x5000.
+>
+> - Explicitly set, clear, or change the permissions of any mapping in the current address space.
+>
+> - Dump the contents of a range of memory given either a virtual or physical address range. Be sure the dump code behaves correctly when the range extends across page boundaries!
+>
+> - Do anything else that you think might be useful later for debugging the kernel. (There's a good chance it will be!)
+>
+>   [这个摘抄自大佬的\^_\^](https://github.com/Clann24/jos/tree/master/lab2)
+
+```shell
+➜  lab git:(lab2) ✗ make grade
+make clean
+make[1]: Entering directory '/home/mech0n/JOS/lab'
+rm -rf obj .gdbinit jos.in qemu.log
+make[1]: Leaving directory '/home/mech0n/JOS/lab'
+./grade-lab2
+make[1]: Entering directory '/home/mech0n/JOS/lab'
++ as kern/entry.S
++ cc kern/entrypgdir.c
++ cc kern/init.c
++ cc kern/console.c
++ cc kern/monitor.c
++ cc kern/pmap.c
++ cc kern/kclock.c
++ cc kern/printf.c
++ cc kern/kdebug.c
++ cc lib/printfmt.c
++ cc lib/readline.c
++ cc lib/string.c
++ ld obj/kern/kernel
+ld: warning: section `.bss' type changed to PROGBITS
++ as boot/boot.S
++ cc -Os boot/main.c
++ ld boot/boot
+boot block is 390 bytes (max 510)
++ mk obj/kern/kernel.img
+make[1]: Leaving directory '/home/mech0n/JOS/lab'
+running JOS: (1.2s)
+  Physical page allocator: OK
+  Page management: OK
+  Kernel page directory: OK
+  Page management 2: OK
+Score: 70/70
+```
+
+### Reference 
+
+[MMU (一）](https://www.cnblogs.com/ikaka/p/3602536.html)
 
