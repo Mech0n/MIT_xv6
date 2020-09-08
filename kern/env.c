@@ -108,6 +108,7 @@ envid2env(envid_t envid, struct Env **env_store, bool checkperm)
 // Mark all environments in 'envs' as free, set their env_ids to 0,
 // and insert them into the env_free_list.
 // Make sure the environments are in the free list in the same order
+// 这里需要调整这些Env链入list的顺序，确保第一次分配Env的时候返回envs[0],所以应该反着链入到链表。
 // they are in the envs array (i.e., so that the first call to
 // env_alloc() returns envs[0]).
 //
@@ -116,6 +117,15 @@ env_init(void)
 {
 	// Set up envs array
 	// LAB 3: Your code here.
+	memset(envs, 0, sizeof(envs));
+	env_free_list = NULL;
+	for(int i = NENV - 1; i >= 0; i--)
+	{
+		envs[i].env_link = env_free_list;
+		env_free_list = &envs[i];
+		// env_free_list = envs + i;
+	}
+	assert(env_free_list == envs);
 
 	// Per-CPU part of the initialization
 	env_init_percpu();
@@ -179,6 +189,9 @@ env_setup_vm(struct Env *e)
 	//    - The functions in kern/pmap.h are handy.
 
 	// LAB 3: Your code here.
+	e->env_pgdir = page2kva(p);
+	p->pp_ref++;
+	memcpy(e->env_pgdir, kern_pgdir, PGSIZE);
 
 	// UVPT maps the env's own page table read-only.
 	// Permissions: kernel R, user R
@@ -267,6 +280,17 @@ region_alloc(struct Env *e, void *va, size_t len)
 	//   'va' and 'len' values that are not page-aligned.
 	//   You should round va down, and round (va + len) up.
 	//   (Watch out for corner-cases!)
+	void *v = ROUNDDOWN(va, PGSIZE);
+	size_t l = ROUNDUP(len, PGSIZE);
+	for (uint32_t i = 0; i < l; i += PGSIZE) 
+	{
+		struct PageInfo *p = page_alloc(0);
+		if (!p) 
+      panic("region_alloc :%e", -E_NO_MEM);
+		assert(!page_insert(e->env_pgdir, p, v, PTE_U | PTE_W));
+		v += PGSIZE;
+		assert(v > va && i < len);
+	}
 }
 
 //
@@ -323,24 +347,55 @@ load_icode(struct Env *e, uint8_t *binary)
 	//  What?  (See env_run() and env_pop_tf() below.)
 
 	// LAB 3: Your code here.
+	struct Elf *ELFHDR = (struct Elf*)binary;
+	assert(ELFHDR->e_magic == ELF_MAGIC);
+	struct Proghdr *ph, *eph;
 
+	ph = (struct Proghdr *) ((uint8_t *) ELFHDR + ELFHDR->e_phoff);
+	eph = ph + ELFHDR->e_phnum;
+	lcr3(PADDR(e->env_pgdir));
+	for (; ph < eph; ph++) 
+	{
+		if (ph->p_type == ELF_PROG_LOAD)
+		{
+			region_alloc(e, (void*)(ph->p_va), ph->p_memsz);
+			uint8_t *src = binary + ph->p_offset;
+			uint8_t *dst = (uint8_t*)ph->p_va;
+			// 页面可能不是连续
+			memcpy(dst, src, ph->p_filesz);
+			if (ph->p_filesz < ph->p_memsz)
+				memset(dst + ph->p_filesz, 0, ph->p_memsz - ph->p_filesz);
+		}
+	}
+	lcr3(PADDR(kern_pgdir));
+	e->env_tf.tf_eip = ELFHDR->e_entry;
 	// Now map one page for the program's initial stack
 	// at virtual address USTACKTOP - PGSIZE.
 
 	// LAB 3: Your code here.
+	// 分配一个页面做为程序的栈
+	region_alloc(e, (void*)(USTACKTOP - PGSIZE), PGSIZE);
 }
 
 //
 // Allocates a new env with env_alloc, loads the named elf
 // binary into it with load_icode, and sets its env_type.
+// 这个函数只在内核初始化期间调用
 // This function is ONLY called during kernel initialization,
+// 在运行第一个用户模式环境之前。
 // before running the first user-mode environment.
 // The new env's parent ID is set to 0.
+// 父ID为0.
 //
 void
 env_create(uint8_t *binary, enum EnvType type)
 {
 	// LAB 3: Your code here.
+	struct Env *env;
+	assert(!env_alloc(&env, 0));
+	env->env_parent_id = 0;
+	env->env_type = type;
+	load_icode(env, binary);
 }
 
 //
@@ -412,7 +467,9 @@ env_destroy(struct Env *e)
 
 //
 // Restores the register values in the Trapframe with the 'iret' instruction.
+// 使用'iret'指令恢复Trapframe中的寄存器值。
 // This exits the kernel and starts executing some environment's code.
+// 这将退出内核并开始执行一些环境代码。
 //
 // This function does not return.
 //
@@ -432,6 +489,7 @@ env_pop_tf(struct Trapframe *tf)
 
 //
 // Context switch from curenv to env e.
+// context从curenv切换到env e。
 // Note: if this is the first call to env_run, curenv is NULL.
 //
 // This function does not return.
@@ -440,13 +498,19 @@ void
 env_run(struct Env *e)
 {
 	// Step 1: If this is a context switch (a new environment is running):
+	//			如果这是一个context切换(一个新的环境正在运行)
 	//	   1. Set the current environment (if any) back to
 	//	      ENV_RUNNABLE if it is ENV_RUNNING (think about
 	//	      what other states it can be in),
+	//			如果当前环境ENV_RUNNABLE，则将其设置为ENV RUNNABLE
 	//	   2. Set 'curenv' to the new environment,
+	// 			curenv = e;
 	//	   3. Set its status to ENV_RUNNING,
+	//			curenv->env_status = ENV_RUNNING
 	//	   4. Update its 'env_runs' counter,
+	//			e->env_runs++
 	//	   5. Use lcr3() to switch to its address space.
+	//			lcr3()改变页面目录，使用程序的地址空间。
 	// Step 2: Use env_pop_tf() to restore the environment's
 	//	   registers and drop into user mode in the
 	//	   environment.
@@ -457,7 +521,13 @@ env_run(struct Env *e)
 	//	e->env_tf to sensible values.
 
 	// LAB 3: Your code here.
-
+	if (curenv && curenv->env_status == ENV_RUNNING)
+		 curenv->env_status = ENV_RUNNABLE;
+	curenv = e;
+	curenv->env_status = ENV_RUNNING;
+	e->env_runs++;
+	lcr3(PADDR(e->env_pgdir));
+	env_pop_tf(&(e->env_tf));
 	panic("env_run not yet implemented");
 }
 
