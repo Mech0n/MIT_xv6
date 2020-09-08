@@ -279,3 +279,220 @@ JOS内核可以通过首先将`uintptr_t`强制转换为指针类型来取消引
 ```
 
 `check_page()`, called from `mem_init()`, tests your page table management routines. You should make sure it reports success before proceeding.
+
+##### `pgdir_walk()`
+
+该函数的作用是获得指向线性地址页表项的指针
+
+```c
+// Given 'pgdir', a pointer to a page directory, pgdir_walk returns
+// a pointer to the page table entry (PTE) for linear address 'va'.
+// This requires walking the two-level page table structure.
+//
+// The relevant page table page might not exist yet.
+// If this is true, and create == false, then pgdir_walk returns NULL.
+// Otherwise, pgdir_walk allocates a new page table page with page_alloc.
+//    - If the allocation fails, pgdir_walk returns NULL.
+//    - Otherwise, the new page's reference count is incremented,
+//	the page is cleared,
+//	and pgdir_walk returns a pointer into the new page table page.
+//
+// Hint 1: you can turn a PageInfo * into the physical address of the
+// page it refers to with page2pa() from kern/pmap.h.
+//
+// Hint 2: the x86 MMU checks permission bits in both the page directory
+// and the page table, so it's safe to leave permissions in the page
+// directory more permissive than strictly necessary.
+//
+// Hint 3: look at inc/mmu.h for useful macros that manipulate page
+// table and page directory entries.
+//
+pte_t *
+pgdir_walk(pde_t *pgdir, const void *va, int create)
+{
+	// Fill this function in
+	pde_t *pt = pgdir + PDX(va);
+	pde_t *pt_addr_v;
+
+	if (*pt & PTE_P)
+	{
+		pt_addr_v = (pte_t *)KADDR(PTE_ADDR(*pt));
+		return pt_addr_v + PTX(va);
+	}
+	else
+	{
+		struct PageInfo *pg;
+		if (create == 1 && (pg = page_alloc(ALLOC_ZERO)) != 0)
+		{
+			memset(page2kva(pg), 0, PGSIZE);
+			pg->pp_ref++;
+			*pt = PADDR(page2kva(pg)) | PTE_U | PTE_W | PTE_P;
+			pt_addr_v = (pte_t *)KADDR(PTE_ADDR(*pt));
+			return pt_addr_v + PTX(va);
+		}
+	}
+	return NULL;
+}
+```
+
+##### `boot_map_region()`
+
+将虚拟地址 `[va, va+size)` 映射到物理地址 `[pa, pa+size)`
+
+注释中提到可以使用上面写的 `pgdir_walk` ，获取页表地址，接着将物理地址的值与上权限位赋给页表地址
+
+需要注意这里是 静态映射，不改变 `reference counting`。
+
+关键点是理解 `*page table entry` 结果是对应的物理地址。
+
+```c
+// Map [va, va+size) of virtual address space to physical [pa, pa+size)
+// in the page table rooted at pgdir.  Size is a multiple of PGSIZE, and
+// va and pa are both page-aligned.
+// Use permission bits perm|PTE_P for the entries.
+//
+// This function is only intended to set up the ``static'' mappings
+// above UTOP. As such, it should *not* change the pp_ref field on the
+// mapped pages.
+//
+// Hint: the TA solution uses pgdir_walk
+static void
+boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm)
+{
+	// Fill this function in
+	int offset;
+	pte_t *pt;
+	for (offset = 0; offset < size; offset += PGSIZE)
+	{
+		pt = pgdir_walk(pgdir, (void *)va, 1);
+		*pt = pa | perm | PTE_P;
+		pa += PGSIZE;
+		va += PGSIZE;
+	}
+}
+```
+
+##### `page_lookup()`
+
+根据提示，`pgdir_walk` 可以获取对应的页表条目指针；`pa2page` 可以将 页表地址转换为页表。
+
+```c
+// Return the page mapped at virtual address 'va'.
+// If pte_store is not zero, then we store in it the address
+// of the pte for this page.  This is used by page_remove and
+// can be used to verify page permissions for syscall arguments,
+// but should not be used by most callers.
+//
+// Return NULL if there is no page mapped at va.
+//
+// Hint: the TA solution uses pgdir_walk and pa2page.
+//
+struct PageInfo *
+page_lookup(pde_t *pgdir, void *va, pte_t **pte_store)
+{
+	// Fill this function in
+	pte_t *pte = pgdir_walk(pgdir, va, 0);
+
+	if (pte_store)
+		*pte_store = pte;
+
+	if (pte && (*pte & PTE_P))
+		return pa2page(PTE_ADDR(*pte));
+
+	return NULL;
+}
+```
+
+##### `page_remove()`
+
+取消虚拟地址 `va` 的映射，包含以下操作：
+
+- `reference count` 减少
+- 如果`reference count` 减至0，需要释放物理页面
+- 对应 `va` 的页表条目应被置为0（如果存在）
+- 如果从页表中移除了条目，则 `TLB` 应失效
+
+```c
+// Unmaps the physical page at virtual address 'va'.
+// If there is no physical page at that address, silently does nothing.
+//
+// Details:
+//   - The ref count on the physical page should decrement.
+//   - The physical page should be freed if the refcount reaches 0.
+//   - The pg table entry corresponding to 'va' should be set to 0.
+//     (if such a PTE exists)
+//   - The TLB must be invalidated if you remove an entry from
+//     the page table.
+//
+// Hint: The TA solution is implemented using page_lookup,
+// 	tlb_invalidate, and page_decref.
+//
+void page_remove(pde_t *pgdir, void *va)
+{
+	// Fill this function in
+	pte_t *pte;
+	struct PageInfo *page = page_lookup(pgdir, va, &pte);
+	if (page)
+	{
+		page_decref(page);
+		*pte = 0;
+		tlb_invalidate(pgdir, va);
+	}
+}
+```
+
+##### `page_insert()`
+
+完成物理页面`pp` 和虚拟地址 `va` 之间的映射，将页表条目的低12bit设置为 `perm|PTEE_P`
+
+```c
+// Map the physical page 'pp' at virtual address 'va'.
+// The permissions (the low 12 bits) of the page table entry
+// should be set to 'perm|PTE_P'.
+//
+// Requirements
+//   - If there is already a page mapped at 'va', it should be page_remove()d.
+//   - If necessary, on demand, a page table should be allocated and inserted
+//     into 'pgdir'.
+//   - pp->pp_ref should be incremented if the insertion succeeds.
+//   - The TLB must be invalidated if a page was formerly present at 'va'.
+//
+// Corner-case hint: Make sure to consider what happens when the same
+// pp is re-inserted at the same virtual address in the same pgdir.
+// However, try not to distinguish this case in your code, as this
+// frequently leads to subtle bugs; there's an elegant way to handle
+// everything in one code path.
+//
+// RETURNS:
+//   0 on success
+//   -E_NO_MEM, if page table couldn't be allocated
+//
+// Hint: The TA solution is implemented using pgdir_walk, page_remove,
+// and page2pa.
+//
+int page_insert(pde_t *pgdir, struct PageInfo *pp, void *va, int perm)
+{
+	// Fill this function in
+	pte_t *pte = pgdir_walk(pgdir, va, 1);
+
+	if (!pte)
+		return -E_NO_MEM;
+
+	if (*pte & PTE_P)
+	{
+		if (PTE_ADDR(*pte) == page2pa(pp))
+		{
+			tlb_invalidate(pgdir, va);
+			pp->pp_ref--;
+		}
+		else
+			page_remove(pgdir, va);
+	}
+
+	*pte = page2pa(pp) | perm | PTE_P;
+	pp->pp_ref++;
+	pgdir[PDX(va)] |= perm;
+	return 0;
+}
+```
+
